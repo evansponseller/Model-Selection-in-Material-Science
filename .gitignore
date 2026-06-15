@@ -1,0 +1,32 @@
+# Environment / secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Data files (large / generated)
+data/paper_extractions.json
+
+# Results — keep CSVs, exclude generated ML artifacts
+results/meta_classifier.joblib
+results/meta_features.csv
+results/meta_labels.csv
+results/meta_classifier_results.csv
+results/meta_confusion_matrix.png
+results/figures/
+results/tables/
+results/analysis_report.txt
+
+# macOS
+.DS_Store
