@@ -47,9 +47,14 @@ from config import (
 
 CSV_COLUMNS = [
     "title", "authors", "year", "doi", "ml_category",
-    "ml_models", "target_properties", "dataset_size",
-    "data_type", "features", "num_features",
-    "performance_metric", "metric_value", "metric_type",
+    "ml_models", "ml_models_quote",
+    "target_properties", "target_properties_quote",
+    "dataset_size", "dataset_size_quote",
+    "data_type", "data_type_quote",
+    "features", "features_quote",
+    "num_features",
+    "performance_metric", "performance_metric_quote",
+    "metric_value", "metric_type",
     "confidence",
 ]
 
@@ -113,18 +118,25 @@ Use exactly these keys:
 
 {{
   "ml_models": "<comma-separated model names, or NR>",
+  "ml_models_quote": "<exact verbatim sentence from the context that best supports ml_models, or NR>",
   "target_properties": "<comma-separated property names, or NR. For MLIP papers: physical behavior studied, NOT energies/forces>",
+  "target_properties_quote": "<exact verbatim sentence from the context that best supports target_properties, or NR>",
   "dataset_size": <integer or null>,
+  "dataset_size_quote": "<exact verbatim sentence from the context that best supports dataset_size, or NR>",
   "data_type": "<experimental | computational | both | NR>",
+  "data_type_quote": "<exact verbatim sentence from the context that best supports data_type, or NR>",
   "features": "<comma-separated feature names, or NR>",
+  "features_quote": "<exact verbatim sentence from the context that best supports features, or NR>",
   "num_features": <integer or null>,
   "performance_metric": "<best reported metric string, e.g. 'R²=0.95' or 'RMSE=0.12 eV/Å', or NR>",
+  "performance_metric_quote": "<exact verbatim sentence from the context that best supports performance_metric, or NR>",
   "metric_value": <numeric value as float, e.g. 0.95 for R²=0.95 or 0.12 for RMSE=0.12, or null>,
   "metric_type": "<R2 | RMSE | MAE | MAPE | accuracy | other | NR>",
   "confidence": "<high | medium | low>"
 }}
 
 Rules:
+- For every _quote field: copy the sentence VERBATIM from the context above — do not paraphrase or summarize. If no sentence supports that field, use NR.
 - data_type: 'computational' = DFT/MD/CALPHAD only. 'both' = training set explicitly mixes lab + simulation data. DFT-trained MLIP run in MD is still 'computational'.
 - performance_metric: report the BEST result the authors highlight for their primary model. Prefer test/validation metrics over training metrics. For MLIPs, RMSE on energy/force is fine.
 - metric_value: extract just the number (e.g. 0.95 from R²=0.95, 12.3 from RMSE=12.3 MPa).
@@ -142,9 +154,14 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
         raise EnvironmentError("JHU_AI_GATEWAY_API_KEY is not set.")
 
     _NR_RESULT = {
-        "ml_models": "NR", "target_properties": "NR", "dataset_size": "NR",
-        "data_type": "NR", "features": "NR", "num_features": "NR",
-        "performance_metric": "NR", "metric_value": "NR", "metric_type": "NR",
+        "ml_models": "NR", "ml_models_quote": "NR",
+        "target_properties": "NR", "target_properties_quote": "NR",
+        "dataset_size": "NR", "dataset_size_quote": "NR",
+        "data_type": "NR", "data_type_quote": "NR",
+        "features": "NR", "features_quote": "NR",
+        "num_features": "NR",
+        "performance_metric": "NR", "performance_metric_quote": "NR",
+        "metric_value": "NR", "metric_type": "NR",
         "confidence": "low",
     }
 
@@ -168,7 +185,6 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
     payload = {
         "model": EXTRACT_MODEL,
         "max_tokens": 1024,
-        "temperature": 0,
         "messages": [{"role": "user", "content": prompt}],
     }
 
@@ -186,17 +202,26 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
             text = re.sub(r"^```(?:json)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
             args = _json.loads(text)
+            def _str(v) -> str:
+                return str(v) if v is not None and str(v).strip() else "NR"
+
             return {
-                "ml_models":         str(args.get("ml_models") or "NR"),
-                "target_properties": str(args.get("target_properties") or "NR"),
-                "dataset_size":      str(args["dataset_size"]) if args.get("dataset_size") is not None else "NR",
-                "data_type":         str(args.get("data_type") or "NR"),
-                "features":          str(args.get("features") or "NR"),
-                "num_features":      str(args["num_features"]) if args.get("num_features") is not None else "NR",
-                "performance_metric": str(args.get("performance_metric") or "NR"),
-                "metric_value":      str(args["metric_value"]) if args.get("metric_value") is not None else "NR",
-                "metric_type":       str(args.get("metric_type") or "NR"),
-                "confidence":        str(args.get("confidence") or "low"),
+                "ml_models":                  _str(args.get("ml_models")),
+                "ml_models_quote":            _str(args.get("ml_models_quote")),
+                "target_properties":          _str(args.get("target_properties")),
+                "target_properties_quote":    _str(args.get("target_properties_quote")),
+                "dataset_size":               str(args["dataset_size"]) if args.get("dataset_size") is not None else "NR",
+                "dataset_size_quote":         _str(args.get("dataset_size_quote")),
+                "data_type":                  _str(args.get("data_type")),
+                "data_type_quote":            _str(args.get("data_type_quote")),
+                "features":                   _str(args.get("features")),
+                "features_quote":             _str(args.get("features_quote")),
+                "num_features":               str(args["num_features"]) if args.get("num_features") is not None else "NR",
+                "performance_metric":         _str(args.get("performance_metric")),
+                "performance_metric_quote":   _str(args.get("performance_metric_quote")),
+                "metric_value":               str(args["metric_value"]) if args.get("metric_value") is not None else "NR",
+                "metric_type":                _str(args.get("metric_type")),
+                "confidence":                 _str(args.get("confidence")) if args.get("confidence") else "low",
             }
         except _json.JSONDecodeError as exc:
             print(f"    [extract] JSON parse error (attempt {attempt}): {exc}.")

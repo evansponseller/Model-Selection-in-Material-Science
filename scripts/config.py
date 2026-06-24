@@ -57,14 +57,14 @@ AI_GATEWAY_URL = "https://gateway.engineering.jhu.edu/gateway/compat/chat/comple
 # Used for classification (retrieve_data.py) — fast, cheap
 CLASSIFY_MODEL = "anthropic/claude-haiku-4.5"
 # Used for field extraction (extract_data.py) — higher accuracy
-EXTRACT_MODEL = "anthropic/claude-sonnet-4.6"
+EXTRACT_MODEL = "anthropic/claude-opus-4-8"
 
 HTTP_REFERER = "https://github.com/Metalearning_AlloyDesign"
 
 # ── Claude API via JHU gateway (native Anthropic route) ───────────────────
 ANTHROPIC_BASE_URL = "https://gateway.engineering.jhu.edu/gateway/anthropic"
 CLAUDE_CLASSIFY_MODEL = "claude-haiku-4-5-20251001"
-CLAUDE_EXTRACT_MODEL = "claude-sonnet-4-6"
+CLAUDE_EXTRACT_MODEL = "claude-opus-4-8"
 
 # ── arXiv ──────────────────────────────────────────────────────────────────
 ARXIV_QUERY = (
