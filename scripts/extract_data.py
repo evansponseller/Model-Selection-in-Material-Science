@@ -52,10 +52,10 @@ CSV_COLUMNS = [
     "dataset_size", "dataset_size_quote",
     "data_type", "data_type_quote",
     "features", "features_quote",
-    "num_features",
+    "num_features", "num_features_explanation",
     "performance_metric", "performance_metric_quote",
     "metric_value", "metric_type",
-    "confidence",
+    "confidence", "confidence_explanation",
 ]
 
 
@@ -128,11 +128,13 @@ Use exactly these keys:
   "features": "<comma-separated feature names, or NR>",
   "features_quote": "<exact verbatim sentence from the context that best supports features, or NR>",
   "num_features": <integer or null>,
+  "num_features_explanation": "<explain how you arrived at the num_features count — cite the relevant evidence from the context, e.g. which sentence named the features or stated the count explicitly, or how you inferred it from the features list>",
   "performance_metric": "<best reported metric string, e.g. 'R²=0.95' or 'RMSE=0.12 eV/Å', or NR>",
   "performance_metric_quote": "<exact verbatim sentence from the context that best supports performance_metric, or NR>",
   "metric_value": <numeric value as float, e.g. 0.95 for R²=0.95 or 0.12 for RMSE=0.12, or null>,
   "metric_type": "<R2 | RMSE | MAE | MAPE | accuracy | other | NR>",
-  "confidence": "<high | medium | low>"
+  "confidence": "<high | medium | low>",
+  "confidence_explanation": "<explain why you assigned this confidence level — list which fields are null/NR and why, or confirm all fields were found>"
 }}
 
 Rules:
@@ -159,10 +161,10 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
         "dataset_size": "NR", "dataset_size_quote": "NR",
         "data_type": "NR", "data_type_quote": "NR",
         "features": "NR", "features_quote": "NR",
-        "num_features": "NR",
+        "num_features": "NR", "num_features_explanation": "NR",
         "performance_metric": "NR", "performance_metric_quote": "NR",
         "metric_value": "NR", "metric_type": "NR",
-        "confidence": "low",
+        "confidence": "low", "confidence_explanation": "NR",
     }
 
     context_parts: list[str] = []
@@ -184,7 +186,7 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
     }
     payload = {
         "model": EXTRACT_MODEL,
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         "messages": [{"role": "user", "content": prompt}],
     }
 
@@ -217,11 +219,13 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
                 "features":                   _str(args.get("features")),
                 "features_quote":             _str(args.get("features_quote")),
                 "num_features":               str(args["num_features"]) if args.get("num_features") is not None else "NR",
+                "num_features_explanation":   _str(args.get("num_features_explanation")),
                 "performance_metric":         _str(args.get("performance_metric")),
                 "performance_metric_quote":   _str(args.get("performance_metric_quote")),
                 "metric_value":               str(args["metric_value"]) if args.get("metric_value") is not None else "NR",
                 "metric_type":                _str(args.get("metric_type")),
                 "confidence":                 _str(args.get("confidence")) if args.get("confidence") else "low",
+                "confidence_explanation":     _str(args.get("confidence_explanation")),
             }
         except _json.JSONDecodeError as exc:
             print(f"    [extract] JSON parse error (attempt {attempt}): {exc}.")
