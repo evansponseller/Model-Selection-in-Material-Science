@@ -254,7 +254,7 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
     }
     payload = {
         "model": EXTRACT_MODEL,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "messages": [{"role": "user", "content": prompt}],
     }
 
@@ -267,7 +267,10 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
-            text = resp.json()["choices"][0]["message"]["content"].strip()
+            choice = resp.json()["choices"][0]
+            if choice.get("finish_reason") == "length":
+                print("    [extract] Response hit max_tokens (truncated) — raise max_tokens.")
+            text = choice["message"]["content"].strip()
             # Strip markdown code fences if present
             text = re.sub(r"^```(?:json)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
