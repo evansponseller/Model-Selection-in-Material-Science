@@ -35,6 +35,7 @@ from config import (
     EXTRACT_SKIP_SECTIONS,
     EXTRACT_MODEL,
     EXTRACTION_FIELDS,
+    EXCLUDED_CSV,
     FIELD_KEYWORDS,
     HTTP_REFERER,
     INPUT_JSON,
@@ -115,6 +116,39 @@ def retrieve_context(sections: dict[str, str], field: str) -> str:
     return " ".join(context_parts)
 
 
+# ── Per-item value/quote formatting ───────────────────────────────────────
+
+def _format_items(arr) -> tuple[str, str]:
+    """
+    Turn a list of {"value", "quote"} objects into (values, quotes) strings for the CSV.
+    - values:  comma-separated item names           e.g. "Random Forest, XGBoost"
+    - quotes:  one line per item, each with its own verbatim quote, e.g.
+                 Random Forest — "We trained a random forest …"
+                 XGBoost — "An XGBoost model was also fit …"
+    Returns ("NR", "NR") if there are no supportable items.
+    """
+    if not isinstance(arr, list):
+        # Back-compat: a bare string still works, just without per-item quotes
+        s = str(arr).strip() if arr is not None else ""
+        return (s, "NR") if s and s.upper() != "NR" else ("NR", "NR")
+
+    values, lines = [], []
+    for item in arr:
+        if isinstance(item, dict):
+            value = str(item.get("value") or "").strip()
+            quote = str(item.get("quote") or "").strip()
+        else:
+            value, quote = str(item).strip(), ""
+        if not value:
+            continue
+        values.append(value)
+        lines.append(f'{value} — "{quote}"' if quote and quote.upper() != "NR" else f"{value} — NR")
+
+    if not values:
+        return "NR", "NR"
+    return ", ".join(values), "\n".join(lines)
+
+
 # ── Claude extraction via structured JSON prompt ──────────────────────────
 
 _EXTRACTION_PROMPT = """\
@@ -133,16 +167,13 @@ Reply with ONLY a valid JSON object — no markdown, no preamble, no trailing te
 Use exactly these keys:
 
 {{
-  "ml_models": "<comma-separated model names, or NR>",
-  "ml_models_quote": "<exact verbatim sentence from the context that best supports ml_models, or NR>",
-  "target_properties": "<comma-separated property names, or NR. For MLIP papers: physical behavior studied, NOT energies/forces>",
-  "target_properties_quote": "<exact verbatim sentence from the context that best supports target_properties, or NR>",
+  "ml_models": [{{"value": "<one model name>", "quote": "<exact verbatim sentence that directly supports THIS model>"}}, ...],
+  "target_properties": [{{"value": "<one property>", "quote": "<exact verbatim sentence that directly supports THIS property>"}}, ...],
   "dataset_size": <integer or null>,
   "dataset_size_quote": "<exact verbatim sentence from the context that best supports dataset_size, or NR>",
   "data_type": "<experimental | computational | both | NR>",
   "data_type_quote": "<exact verbatim sentence from the context that best supports data_type, or NR>",
-  "features": "<comma-separated feature names, or NR>",
-  "features_quote": "<exact verbatim sentence from the context that best supports features, or NR>",
+  "features": [{{"value": "<one feature/descriptor>", "quote": "<exact verbatim sentence that directly supports THIS feature>"}}, ...],
   "num_features": <integer or null>,
   "num_features_explanation": "<explain how you arrived at the num_features count — cite the relevant evidence from the context, e.g. which sentence named the features or stated the count explicitly, or how you inferred it from the features list>",
   "performance_metric": "<best reported metric string, e.g. 'R²=0.95' or 'RMSE=0.12 eV/Å', or NR>",
@@ -156,8 +187,12 @@ Use exactly these keys:
 }}
 
 Rules:
-- For every _quote field: copy the sentence VERBATIM from the context above — do not paraphrase or summarize. The quote must DIRECTLY state the value you extracted; if the only available sentence merely alludes to it or is weak/indirect evidence, use NR instead of a weak quote.
-- features: report the INPUT variables/descriptors fed INTO the model. Do NOT report the optimization objectives, design goals, or target properties here (those belong in target_properties). If the paper only names design targets and never lists model inputs, use NR.
+- ml_models, target_properties, features are LISTS — one object per distinct item, each with its OWN verbatim quote.
+  * Provide a separate quote for EACH item. A quote may only be reused if the same sentence genuinely names multiple of those items.
+  * PRECISION over recall: include an item ONLY if you can supply a verbatim sentence from the context that DIRECTLY supports it. If a candidate item has no clear supporting sentence, OMIT it entirely (do not invent or guess). If a list would have no supportable items, return an empty list [].
+  * Quotes must be copied VERBATIM from the context — never paraphrase or summarize.
+- For every other _quote field (dataset_size_quote, data_type_quote, performance_metric_quote): copy the sentence VERBATIM; the quote must DIRECTLY state the value, else NR.
+- features: report the INPUT variables/descriptors fed INTO the model. Do NOT report the optimization objectives, design goals, or target properties here (those belong in target_properties). If the paper only names design targets and never lists model inputs, return [].
 - recommend_exclude (we prioritize ACCURACY over a complete dataset — when in doubt, exclude):
   * Set "yes" if the paper's only ML component is a machine-learned interatomic potential (MLIP) or
     force field used to drive molecular dynamics / molecular statics simulations — i.e. the model
@@ -219,7 +254,7 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
     }
     payload = {
         "model": EXTRACT_MODEL,
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "messages": [{"role": "user", "content": prompt}],
     }
 
@@ -240,17 +275,21 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
             def _str(v) -> str:
                 return str(v) if v is not None and str(v).strip() else "NR"
 
+            ml_models, ml_models_quote = _format_items(args.get("ml_models"))
+            target_props, target_props_quote = _format_items(args.get("target_properties"))
+            features, features_quote = _format_items(args.get("features"))
+
             return {
-                "ml_models":                  _str(args.get("ml_models")),
-                "ml_models_quote":            _str(args.get("ml_models_quote")),
-                "target_properties":          _str(args.get("target_properties")),
-                "target_properties_quote":    _str(args.get("target_properties_quote")),
+                "ml_models":                  ml_models,
+                "ml_models_quote":            ml_models_quote,
+                "target_properties":          target_props,
+                "target_properties_quote":    target_props_quote,
                 "dataset_size":               str(args["dataset_size"]) if args.get("dataset_size") is not None else "NR",
                 "dataset_size_quote":         _str(args.get("dataset_size_quote")),
                 "data_type":                  _str(args.get("data_type")),
                 "data_type_quote":            _str(args.get("data_type_quote")),
-                "features":                   _str(args.get("features")),
-                "features_quote":             _str(args.get("features_quote")),
+                "features":                   features,
+                "features_quote":             features_quote,
                 "num_features":               str(args["num_features"]) if args.get("num_features") is not None else "NR",
                 "num_features_explanation":   _str(args.get("num_features_explanation")),
                 "performance_metric":         _str(args.get("performance_metric")),
@@ -319,10 +358,12 @@ def run():
     with open(INPUT_JSON) as f:
         papers = json.load(f)
 
-    processed = load_processed_dois(OUTPUT_CSV)
+    # Resume across BOTH files: a paper already in either is done
+    processed = load_processed_dois(OUTPUT_CSV) | load_processed_dois(EXCLUDED_CSV)
     if processed:
-        print(f"Resuming: {len(processed)} papers already in {OUTPUT_CSV.name}.\n")
+        print(f"Resuming: {len(processed)} papers already processed.\n")
 
+    kept_n = excluded_n = 0
     for i, paper in enumerate(papers, 1):
         doi = paper.get("doi", f"unknown_{i}")
         title = paper.get("title", "")[:80]
@@ -342,13 +383,21 @@ def run():
             "ml_category": paper.get("ml_category", ""),
             **extractions,
         }
-        append_row(OUTPUT_CSV, row)
-        processed.add(doi)
-        print(f"  → written. Confidence: {extractions['confidence']}\n")
+        # Route flagged papers to the excluded file so the main results stay clean
+        if str(extractions.get("recommend_exclude", "")).strip().lower() == "yes":
+            append_row(EXCLUDED_CSV, row)
+            excluded_n += 1
+            print(f"  → EXCLUDED ({extractions.get('exclude_reason','')[:60]}).\n")
+        else:
+            append_row(OUTPUT_CSV, row)
+            kept_n += 1
+            print(f"  → written. Confidence: {extractions['confidence']}\n")
 
+        processed.add(doi)
         time.sleep(RATE_LIMIT_PAUSE)
 
-    print(f"\nDone. Results saved to {OUTPUT_CSV}.")
+    print(f"\nDone. {kept_n} to review in {OUTPUT_CSV.name}, "
+          f"{excluded_n} set aside in {EXCLUDED_CSV.name}.")
 
 
 if __name__ == "__main__":

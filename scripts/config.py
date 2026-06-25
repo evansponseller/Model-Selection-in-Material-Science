@@ -15,6 +15,8 @@ RESULTS_DIR = ROOT / "results"
 INPUT_JSON = DATA_DIR / "paper_extractions.json"
 OUTPUT_JSON = DATA_DIR / "paper_extractions.json"   # alias used by retrieve_data.py
 OUTPUT_CSV = RESULTS_DIR / "extracted_results.csv"
+# Papers the extractor flags recommend_exclude=yes go here, not the main results
+EXCLUDED_CSV = RESULTS_DIR / "excluded_results.csv"
 
 # ── Elsevier / Scopus ──────────────────────────────────────────────────────
 ELSEVIER_API_KEY = os.environ.get("ELSEVIER_API_KEY", "")
