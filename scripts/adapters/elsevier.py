@@ -1,5 +1,7 @@
 """Elsevier/Scopus publisher adapter."""
 
+import io
+import re
 import time
 import xml.etree.ElementTree as ET
 
@@ -17,6 +19,59 @@ from config import (
     SCOPUS_URL,
 )
 from adapters.base import PublisherAdapter
+
+# ── Supplementary-material parsing/extraction ────────────────────────────────
+# Elsevier lists supplementary files as <object ref="mmcN" ...>DOWNLOAD_URL</object>
+# inside the full-text XML. Each has a mimetype and a content/object download URL.
+_OBJECT_RE = re.compile(r"<object\b([^>]*)>([^<]+)</object>")
+
+
+def _parse_supp_objects(xml_text: str) -> list[tuple[str, str, str]]:
+    """Return (ref, mimetype, url) for every supplementary object (ref starts 'mmc')."""
+    out: list[tuple[str, str, str]] = []
+    for m in _OBJECT_RE.finditer(xml_text):
+        attrs, url = m.group(1), m.group(2).strip()
+        ref_m = re.search(r'\bref="([^"]+)"', attrs)
+        mime_m = re.search(r'\bmimetype="([^"]+)"', attrs)
+        if ref_m and ref_m.group(1).lower().startswith("mmc"):
+            out.append((ref_m.group(1), (mime_m.group(1) if mime_m else "").lower(), url))
+    return out
+
+
+def _pdf_to_text(data: bytes) -> str:
+    from pypdf import PdfReader
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as exc:  # noqa: BLE001 — supp parsing is best-effort
+        print(f"  [elsevier] PDF parse failed: {exc}")
+        return ""
+
+
+def _docx_to_text(data: bytes) -> str:
+    import docx
+    try:
+        document = docx.Document(io.BytesIO(data))
+        parts = [p.text for p in document.paragraphs if p.text.strip()]
+        for table in document.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells]
+                if any(cells):
+                    parts.append(" | ".join(cells))
+        return "\n".join(parts)
+    except Exception as exc:  # noqa: BLE001 — supp parsing is best-effort
+        print(f"  [elsevier] DOCX parse failed: {exc}")
+        return ""
+
+
+def _extract_supp_text(mimetype: str, url: str, data: bytes) -> str:
+    """Dispatch text extraction by mimetype/extension. Skips images, spreadsheets, zips."""
+    u = url.lower()
+    if "pdf" in mimetype or ".pdf" in u:
+        return _pdf_to_text(data)
+    if "word" in mimetype or "wordprocessing" in mimetype or ".docx" in u:
+        return _docx_to_text(data)
+    return ""  # unsupported supp type (xls, zip, image, video) — skip
 
 # Elsevier XML namespaces
 _NS = {
@@ -180,3 +235,56 @@ class ElsevierAdapter(PublisherAdapter):
                 if title == "introduction":
                     return " ".join(t.strip() for t in section.itertext() if t.strip())
         return ""
+
+    # ── Supplementary materials ──────────────────────────────────────────────
+
+    def fetch_supplementary_text(self, doi: str) -> str:
+        """
+        Download and extract text from a paper's supplementary files (mmcN objects).
+        Returns the combined text of all PDF/DOCX supplements, labelled by ref.
+        Returns "" if there are none or none are text-extractable.
+        """
+        if not ELSEVIER_API_KEY:
+            raise EnvironmentError("ELSEVIER_API_KEY is not set.")
+
+        headers = {
+            "X-ELS-APIKey": ELSEVIER_API_KEY,
+            "Accept": "text/xml",
+            "HTTP-Referer": HTTP_REFERER,
+        }
+        try:
+            resp = requests.get(ARTICLE_URL.format(doi=doi), headers=headers, timeout=30)
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            print(f"  [elsevier] Error fetching XML for supp ({doi}): {exc}")
+            return ""
+
+        objects = _parse_supp_objects(resp.text)
+        if not objects:
+            return ""
+
+        chunks: list[str] = []
+        for ref, mimetype, url in objects:
+            data = self._download_object(url)
+            if not data:
+                continue
+            text = _extract_supp_text(mimetype, url, data)
+            if text.strip():
+                chunks.append(f"[{ref}]\n{text.strip()}")
+            else:
+                print(f"  [elsevier] {ref}: unsupported/empty supp type ({mimetype})")
+            time.sleep(RATE_LIMIT_PAUSE)
+
+        return "\n\n".join(chunks)
+
+    def _download_object(self, url: str) -> bytes | None:
+        """Download a single Elsevier object (supplementary file) as bytes."""
+        try:
+            resp = requests.get(
+                url, headers={"X-ELS-APIKey": ELSEVIER_API_KEY}, timeout=60
+            )
+            resp.raise_for_status()
+            return resp.content
+        except requests.RequestException as exc:
+            print(f"  [elsevier] Error downloading object {url}: {exc}")
+            return None

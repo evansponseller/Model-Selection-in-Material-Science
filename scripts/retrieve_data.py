@@ -56,16 +56,24 @@ CLASSIFY_PROMPT = """\
 You are classifying a materials science paper.
 
 Respond with exactly one word:
-- "trained"   — the authors trained or developed their own ML model, interatomic potential,
-                neural network potential, force field, or surrogate model from data
+- "trained"   — the authors trained or developed their OWN ML model, interatomic potential,
+                neural network potential, force field, or surrogate model FROM SCRATCH on data
                 (includes: fitting/training MLIPs, developing machine-learned potentials,
                 training random forests, neural networks, Gaussian processes, etc.)
-- "finetuned" — the authors fine-tuned or adapted a pre-trained ML model or potential
-- "unclear"   — the paper only cites, reviews, or applies existing ML models without
-                training any new model (pure reviews, purely experimental work, etc.)
+- "finetuned" — the authors started FROM a pre-trained model, foundation model, or universal
+                potential (e.g. a published MLIP, ORB, MACE-MP, a universal force field) and
+                fine-tuned, adapted, or retrained it on their own data. Language like
+                "fine-tune", "fine-tuning", "adapted the pre-trained", "retrained on" → finetuned.
+- "unclear"   — the paper does NOT train or fine-tune any model of its own. This INCLUDES
+                papers that merely APPLY/USE an existing pre-trained model or off-the-shelf
+                potential without further training, as well as pure reviews and purely
+                experimental work that only cites ML.
 
-When in doubt between "trained" and "unclear", prefer "trained" if the abstract
-mentions fitting, developing, constructing, or building any ML model or potential.
+Key distinction: building or fitting a model on data = "trained"/"finetuned".
+Only running someone else's already-trained model off the shelf = "unclear".
+When genuinely ambiguous between "trained" and "unclear", prefer "trained" only if the
+text explicitly mentions fitting, training, developing, or constructing a model — not
+merely using or applying one.
 
 Abstract:
 {abstract}
@@ -90,7 +98,6 @@ def classify_paper(abstract: str, intro_text: str) -> str:
         "model": CLASSIFY_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 10,
-        "temperature": 0,
     }
     headers = {
         "Authorization": f"Bearer {AI_GATEWAY_API_KEY}",

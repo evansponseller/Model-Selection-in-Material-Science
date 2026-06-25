@@ -54,8 +54,8 @@ AI_GATEWAY_API_KEY = os.environ.get("JHU_AI_GATEWAY_API_KEY", "")
 # Compat route — OpenAI chat-completions shape, provider-prefixed model names
 AI_GATEWAY_URL = "https://gateway.engineering.jhu.edu/gateway/compat/chat/completions"
 
-# Used for classification (retrieve_data.py) — fast, cheap
-CLASSIFY_MODEL = "anthropic/claude-haiku-4.5"
+# Used for classification (retrieve_data.py)
+CLASSIFY_MODEL = "anthropic/claude-opus-4-8"
 # Used for field extraction (extract_data.py) — higher accuracy
 EXTRACT_MODEL = "anthropic/claude-opus-4-8"
 
@@ -104,6 +104,12 @@ BOILERPLATE_SECTIONS = {
     "credit authorship contribution statement",
 }
 
+# Sections skipped during field extraction. Unlike BOILERPLATE_SECTIONS, this
+# KEEPS supplementary/appendix — those are the authors' own extended methods,
+# where feature lists and dataset details often live (reviewer-flagged). Only
+# sections describing others' work or front/back matter are dropped.
+EXTRACT_SKIP_SECTIONS = BOILERPLATE_SECTIONS - {"supplementary", "appendix"}
+
 # ── Extraction fields ──────────────────────────────────────────────────────
 EXTRACTION_FIELDS = [
     "ml_models",
@@ -133,6 +139,9 @@ FIELD_KEYWORDS: dict[str, list[str]] = {
         "convolutional", "cnn", "lstm", "attention", "transformer", "bert",
         "linear regression", "ridge regression", "lasso", "symbolic regression",
         "kriging", "surrogate",
+        # Tree-based families (reviewer-flagged: Regression Trees were missed)
+        "regression tree", "decision tree", "extra trees", "extremely randomized",
+        "lightgbm", "catboost", "adaboost", "ensemble", "bagging",
         # Interatomic potential families (MLIPs)
         "mlip", "mace", "mtp", "nnp", "nep", "ace", "pace", "mlff",
         "moment tensor", "neuroevolution", "atomic cluster expansion",
@@ -167,7 +176,14 @@ FIELD_KEYWORDS: dict[str, list[str]] = {
         "observations", "entries", "experiments",
     ],
     "data_type": [
-        "experimental", "experiment", "measured", "laboratory",
+        # Anchor on the SOURCE of the training data, not any method mentioned
+        "training data", "training set", "training dataset", "dataset was",
+        "data were collected", "data were generated", "data were obtained",
+        "data were calculated", "data were measured", "data originate",
+        "compiled from", "collected from", "obtained from",
+        # Experimental indicators
+        "experimental", "experiment", "measured", "laboratory", "fabricated",
+        # Computational indicators
         "dft", "density functional", "molecular dynamics", "md simulation",
         "calphad", "ab initio", "first-principles", "first principles",
         "computational", "calculated", "simulated", "synthetic",

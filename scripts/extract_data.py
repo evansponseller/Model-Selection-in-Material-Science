@@ -32,7 +32,7 @@ import requests
 from config import (
     AI_GATEWAY_API_KEY,
     AI_GATEWAY_URL,
-    BOILERPLATE_SECTIONS,
+    EXTRACT_SKIP_SECTIONS,
     EXTRACT_MODEL,
     EXTRACTION_FIELDS,
     FIELD_KEYWORDS,
@@ -56,6 +56,7 @@ CSV_COLUMNS = [
     "performance_metric", "performance_metric_quote",
     "metric_value", "metric_type",
     "confidence", "confidence_explanation",
+    "recommend_exclude", "exclude_reason",
 ]
 
 
@@ -73,6 +74,17 @@ def _split_sentences(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) > 20]
 
 
+def intro_overview(sections: dict[str, str], n: int = 6) -> str:
+    """
+    Return the closing sentences of the introduction — where papers typically
+    state their contributions, core ML approach, and the paper's structure.
+    Used as a multi-stage prime: the LLM reads this first to orient itself.
+    """
+    intro = sections.get("introduction", "")
+    sentences = _split_sentences(intro)
+    return " ".join(sentences[-n:]) if sentences else ""
+
+
 def retrieve_context(sections: dict[str, str], field: str) -> str:
     """
     Score every sentence in non-boilerplate sections against field keywords,
@@ -82,7 +94,7 @@ def retrieve_context(sections: dict[str, str], field: str) -> str:
     scored: list[tuple[float, str]] = []
 
     for section_title, text in sections.items():
-        if section_title.lower() in BOILERPLATE_SECTIONS:
+        if section_title.lower() in EXTRACT_SKIP_SECTIONS:
             continue
         for sentence in _split_sentences(text):
             lower = sentence.lower()
@@ -108,8 +120,12 @@ def retrieve_context(sections: dict[str, str], field: str) -> str:
 _EXTRACTION_PROMPT = """\
 You are extracting structured metadata from a materials science paper about machine learning.
 
-Below are the most relevant sentences from the paper, grouped by the field they address.
-Extract all fields using ONLY information found in these sentences.
+STEP 1 — Read [paper_overview] first (if present). These are the closing sentences of the
+introduction, where authors state their contributions, the core ML method, and the paper's
+structure. Use it to understand what the paper actually does before extracting anything.
+
+STEP 2 — Then extract each field using ONLY information found in the sentences below, which
+are grouped by the field they address.
 
 {context_block}
 
@@ -134,12 +150,25 @@ Use exactly these keys:
   "metric_value": <numeric value as float, e.g. 0.95 for R²=0.95 or 0.12 for RMSE=0.12, or null>,
   "metric_type": "<R2 | RMSE | MAE | MAPE | accuracy | other | NR>",
   "confidence": "<high | medium | low>",
-  "confidence_explanation": "<explain why you assigned this confidence level — list which fields are null/NR and why, or confirm all fields were found>"
+  "confidence_explanation": "<explain why you assigned this confidence level — list which fields are null/NR and why, or confirm all fields were found>",
+  "recommend_exclude": "<yes | no>",
+  "exclude_reason": "<if yes, a brief reason; else NR>"
 }}
 
 Rules:
-- For every _quote field: copy the sentence VERBATIM from the context above — do not paraphrase or summarize. If no sentence supports that field, use NR.
-- data_type: 'computational' = DFT/MD/CALPHAD only. 'both' = training set explicitly mixes lab + simulation data. DFT-trained MLIP run in MD is still 'computational'.
+- For every _quote field: copy the sentence VERBATIM from the context above — do not paraphrase or summarize. The quote must DIRECTLY state the value you extracted; if the only available sentence merely alludes to it or is weak/indirect evidence, use NR instead of a weak quote.
+- features: report the INPUT variables/descriptors fed INTO the model. Do NOT report the optimization objectives, design goals, or target properties here (those belong in target_properties). If the paper only names design targets and never lists model inputs, use NR.
+- recommend_exclude (we prioritize ACCURACY over a complete dataset — when in doubt, exclude):
+  * Set "yes" if the paper's only ML component is a machine-learned interatomic potential (MLIP) or
+    force field used to drive molecular dynamics / molecular statics simulations — i.e. the model
+    predicts energies/forces to run MD, rather than predicting an alloy property from a feature
+    dataset. Note this in exclude_reason (e.g. "MLIP/force field for MD, not property prediction").
+    Still fill in the other fields as best you can.
+  * Set "yes" if the core fields are NOT clearly stated: you must have ml_models AND target_properties
+    AND at least one of (dataset_size, features) clearly supported by the text. If not, exclude and
+    say what is missing in exclude_reason.
+  * Otherwise set "no" and exclude_reason = NR.
+- data_type: classify by the source of the data the model was TRAINED ON — nothing else. 'experimental' = lab-measured/fabricated data. 'computational' = DFT/MD/CALPHAD-generated training data. 'both' = the training set explicitly mixes lab + simulation data. A passing mention of DFT/MD used only for validation, comparison, or cited from prior work does NOT make the data_type computational. If the training data is experimental and simulations are merely referenced, the answer is 'experimental'. A DFT-trained MLIP later run in MD is still 'computational'.
 - performance_metric: report the BEST result the authors highlight for their primary model. Prefer test/validation metrics over training metrics. For MLIPs, RMSE on energy/force is fine.
 - metric_value: extract just the number (e.g. 0.95 from R²=0.95, 12.3 from RMSE=12.3 MPa).
 - metric_type: use R2 for R²/coefficient of determination, RMSE for root-mean-square error, MAE for mean absolute error.
@@ -165,9 +194,13 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
         "performance_metric": "NR", "performance_metric_quote": "NR",
         "metric_value": "NR", "metric_type": "NR",
         "confidence": "low", "confidence_explanation": "NR",
+        "recommend_exclude": "NR", "exclude_reason": "NR",
     }
 
     context_parts: list[str] = []
+    overview = intro_overview(sections)
+    if overview:
+        context_parts.append(f"[paper_overview]\n{overview}")
     for field in EXTRACTION_FIELDS:
         ctx = retrieve_context(sections, field)
         if ctx:
@@ -226,6 +259,8 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
                 "metric_type":                _str(args.get("metric_type")),
                 "confidence":                 _str(args.get("confidence")) if args.get("confidence") else "low",
                 "confidence_explanation":     _str(args.get("confidence_explanation")),
+                "recommend_exclude":          _str(args.get("recommend_exclude")),
+                "exclude_reason":             _str(args.get("exclude_reason")),
             }
         except _json.JSONDecodeError as exc:
             print(f"    [extract] JSON parse error (attempt {attempt}): {exc}.")
