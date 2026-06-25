@@ -13,6 +13,7 @@ Run:  python3 scripts/reclassify.py
 """
 
 import json
+import os
 import shutil
 import sys
 import time
@@ -54,11 +55,16 @@ def run():
 
     # Back up the original before overwriting
     shutil.copy(INPUT_JSON, BACKUP_JSON)
-    with open(INPUT_JSON, "w") as f:
-        json.dump(kept, f, indent=2, ensure_ascii=False)
+
+    def _atomic_dump(obj, path):
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, path)
+
+    _atomic_dump(kept, INPUT_JSON)
     if dropped:
-        with open(DROPPED_JSON, "w") as f:
-            json.dump(dropped, f, indent=2, ensure_ascii=False)
+        _atomic_dump(dropped, DROPPED_JSON)
 
     print(f"\n{changed} papers changed label.")
     print(f"Kept: {len(kept)}  |  Dropped as unclear: {len(dropped)}")

@@ -16,6 +16,7 @@ Run:  python3 scripts/fetch_supplementary.py
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -26,6 +27,14 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 from config import INPUT_JSON, RATE_LIMIT_PAUSE
 from adapters.elsevier import ElsevierAdapter
+
+
+def _atomic_dump(papers: list, path: Path):
+    """Write to a temp file then rename, so a crash mid-write can't corrupt the corpus."""
+    tmp = path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(papers, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
 
 
 def run():
@@ -57,9 +66,8 @@ def run():
         else:
             print("  → no extractable supplementary materials.\n")
 
-        # Crash-safe: persist after every paper
-        with open(INPUT_JSON, "w") as f:
-            json.dump(papers, f, indent=2, ensure_ascii=False)
+        # Crash-safe: persist atomically after every paper
+        _atomic_dump(papers, INPUT_JSON)
         time.sleep(RATE_LIMIT_PAUSE)
 
     print(f"Done. Supplementary text added to {filled} papers.")

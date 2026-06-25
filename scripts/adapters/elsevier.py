@@ -38,11 +38,21 @@ def _parse_supp_objects(xml_text: str) -> list[tuple[str, str, str]]:
     return out
 
 
+def _clean_text(s: str) -> str:
+    """
+    Strip lone UTF-16 surrogates that PDF/DOCX extractors sometimes emit.
+    These cannot be encoded to UTF-8 and would crash json.dump(ensure_ascii=False).
+    """
+    if not s:
+        return s
+    return s.encode("utf-8", "ignore").decode("utf-8")
+
+
 def _pdf_to_text(data: bytes) -> str:
     from pypdf import PdfReader
     try:
         reader = PdfReader(io.BytesIO(data))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        return _clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
     except Exception as exc:  # noqa: BLE001 — supp parsing is best-effort
         print(f"  [elsevier] PDF parse failed: {exc}")
         return ""
@@ -58,7 +68,7 @@ def _docx_to_text(data: bytes) -> str:
                 cells = [c.text.strip() for c in row.cells]
                 if any(cells):
                     parts.append(" | ".join(cells))
-        return "\n".join(parts)
+        return _clean_text("\n".join(parts))
     except Exception as exc:  # noqa: BLE001 — supp parsing is best-effort
         print(f"  [elsevier] DOCX parse failed: {exc}")
         return ""
