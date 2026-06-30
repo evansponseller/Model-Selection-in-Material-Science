@@ -65,6 +65,10 @@ AI_GATEWAY_URL = "https://gateway.engineering.jhu.edu/gateway/compat/chat/comple
 CLASSIFY_MODEL = "anthropic/claude-sonnet-4.6"
 # Used for field extraction (extract_data.py) — higher accuracy
 EXTRACT_MODEL = "anthropic/claude-opus-4-8"
+# Fallback used per-paper when the primary extraction model is rate-limited.
+# Opus has tight per-minute limits; Sonnet's are far higher, so a paper that
+# can't get through on Opus right now is extracted on Sonnet instead of stalling.
+EXTRACT_FALLBACK_MODEL = "anthropic/claude-sonnet-4.6"
 
 HTTP_REFERER = "https://github.com/Metalearning_AlloyDesign"
 

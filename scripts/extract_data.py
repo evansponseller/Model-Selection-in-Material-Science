@@ -34,6 +34,7 @@ from config import (
     AI_GATEWAY_URL,
     EXTRACT_SKIP_SECTIONS,
     EXTRACT_MODEL,
+    EXTRACT_FALLBACK_MODEL,
     EXTRACTION_FIELDS,
     EXCLUDED_CSV,
     FIELD_KEYWORDS,
@@ -58,6 +59,7 @@ CSV_COLUMNS = [
     "metric_value", "metric_type",
     "confidence", "confidence_explanation",
     "recommend_exclude", "exclude_reason",
+    "extraction_model",
 ]
 
 
@@ -230,6 +232,7 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
         "metric_value": "NR", "metric_type": "NR",
         "confidence": "low", "confidence_explanation": "NR",
         "recommend_exclude": "NR", "exclude_reason": "NR",
+        "extraction_model": "none",
     }
 
     context_parts: list[str] = []
@@ -252,75 +255,93 @@ def extract_with_claude(sections: dict[str, str]) -> dict:
         "HTTP-Referer": HTTP_REFERER,
         "Content-Type": "application/json",
     }
-    payload = {
-        "model": EXTRACT_MODEL,
-        "max_tokens": 8192,
-        "messages": [{"role": "user", "content": prompt}],
-    }
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = requests.post(AI_GATEWAY_URL, json=payload, headers=headers, timeout=120)
-            if resp.status_code == 429:
+    def _str(v) -> str:
+        return str(v) if v is not None and str(v).strip() else "NR"
+
+    def _parse(text: str, model: str) -> dict:
+        # Strip markdown code fences if present, then parse JSON
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+        args = _json.loads(text)
+        ml_models, ml_models_quote = _format_items(args.get("ml_models"))
+        target_props, target_props_quote = _format_items(args.get("target_properties"))
+        features, features_quote = _format_items(args.get("features"))
+        return {
+            "ml_models":                  ml_models,
+            "ml_models_quote":            ml_models_quote,
+            "target_properties":          target_props,
+            "target_properties_quote":    target_props_quote,
+            "dataset_size":               str(args["dataset_size"]) if args.get("dataset_size") is not None else "NR",
+            "dataset_size_quote":         _str(args.get("dataset_size_quote")),
+            "data_type":                  _str(args.get("data_type")),
+            "data_type_quote":            _str(args.get("data_type_quote")),
+            "features":                   features,
+            "features_quote":             features_quote,
+            "num_features":               str(args["num_features"]) if args.get("num_features") is not None else "NR",
+            "num_features_explanation":   _str(args.get("num_features_explanation")),
+            "performance_metric":         _str(args.get("performance_metric")),
+            "performance_metric_quote":   _str(args.get("performance_metric_quote")),
+            "metric_value":               str(args["metric_value"]) if args.get("metric_value") is not None else "NR",
+            "metric_type":                _str(args.get("metric_type")),
+            "confidence":                 _str(args.get("confidence")) if args.get("confidence") else "low",
+            "confidence_explanation":     _str(args.get("confidence_explanation")),
+            "recommend_exclude":          _str(args.get("recommend_exclude")),
+            "exclude_reason":             _str(args.get("exclude_reason")),
+            "extraction_model":           model.split("/")[-1],
+        }
+
+    # Try the primary model (Opus); if it's rate-limited right now, fall back to
+    # the secondary model (Sonnet) for THIS paper only — the next paper starts
+    # over on Opus. (max_429 = how many 429s to tolerate before falling back.)
+    models = [
+        (EXTRACT_MODEL,          2,           15),                       # Opus: brief, then fall back
+        (EXTRACT_FALLBACK_MODEL, MAX_RETRIES, RATE_LIMIT_RETRY_PAUSE),   # Sonnet: full patience
+    ]
+    for model, max_429, wait_429 in models:
+        name = model.split("/")[-1]
+        payload = {"model": model, "max_tokens": 8192, "messages": [{"role": "user", "content": prompt}]}
+        rl_hits = 0
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                resp = requests.post(AI_GATEWAY_URL, json=payload, headers=headers, timeout=120)
+                if resp.status_code == 429:
+                    rl_hits += 1
+                    if rl_hits >= max_429:
+                        print(f"    [extract] {name} rate-limited — falling back to next model.")
+                        break
+                    print(f"    [extract] {name} rate limited. Waiting {wait_429}s …")
+                    time.sleep(wait_429)
+                    continue
+                resp.raise_for_status()
+                choice = resp.json()["choices"][0]
+                if choice.get("finish_reason") == "length":
+                    print("    [extract] Response hit max_tokens (truncated) — raise max_tokens.")
+                return _parse(choice["message"]["content"].strip(), model)
+            except _json.JSONDecodeError as exc:
+                print(f"    [extract] {name} JSON parse error (attempt {attempt}): {exc}.")
+            except requests.RequestException as exc:
                 wait = RATE_LIMIT_RETRY_PAUSE * attempt
-                print(f"    [extract] Rate limited. Waiting {wait}s …")
+                print(f"    [extract] {name} network error (attempt {attempt}): {exc}. Waiting {wait}s …")
                 time.sleep(wait)
-                continue
-            resp.raise_for_status()
-            choice = resp.json()["choices"][0]
-            if choice.get("finish_reason") == "length":
-                print("    [extract] Response hit max_tokens (truncated) — raise max_tokens.")
-            text = choice["message"]["content"].strip()
-            # Strip markdown code fences if present
-            text = re.sub(r"^```(?:json)?\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-            args = _json.loads(text)
-            def _str(v) -> str:
-                return str(v) if v is not None and str(v).strip() else "NR"
+        # fall through to the next model
 
-            ml_models, ml_models_quote = _format_items(args.get("ml_models"))
-            target_props, target_props_quote = _format_items(args.get("target_properties"))
-            features, features_quote = _format_items(args.get("features"))
-
-            return {
-                "ml_models":                  ml_models,
-                "ml_models_quote":            ml_models_quote,
-                "target_properties":          target_props,
-                "target_properties_quote":    target_props_quote,
-                "dataset_size":               str(args["dataset_size"]) if args.get("dataset_size") is not None else "NR",
-                "dataset_size_quote":         _str(args.get("dataset_size_quote")),
-                "data_type":                  _str(args.get("data_type")),
-                "data_type_quote":            _str(args.get("data_type_quote")),
-                "features":                   features,
-                "features_quote":             features_quote,
-                "num_features":               str(args["num_features"]) if args.get("num_features") is not None else "NR",
-                "num_features_explanation":   _str(args.get("num_features_explanation")),
-                "performance_metric":         _str(args.get("performance_metric")),
-                "performance_metric_quote":   _str(args.get("performance_metric_quote")),
-                "metric_value":               str(args["metric_value"]) if args.get("metric_value") is not None else "NR",
-                "metric_type":                _str(args.get("metric_type")),
-                "confidence":                 _str(args.get("confidence")) if args.get("confidence") else "low",
-                "confidence_explanation":     _str(args.get("confidence_explanation")),
-                "recommend_exclude":          _str(args.get("recommend_exclude")),
-                "exclude_reason":             _str(args.get("exclude_reason")),
-            }
-        except _json.JSONDecodeError as exc:
-            print(f"    [extract] JSON parse error (attempt {attempt}): {exc}.")
-        except requests.RequestException as exc:
-            wait = RATE_LIMIT_RETRY_PAUSE * attempt
-            print(f"    [extract] Network error (attempt {attempt}): {exc}. Waiting {wait}s …")
-            time.sleep(wait)
-
-    print("    [extract] All retries exhausted. Returning NR for all fields.")
-    return _NR_RESULT
+    # Both models exhausted. Return None so the caller SKIPS this paper without
+    # writing it — a re-run will retry it. (Writing an all-NR row would mark the
+    # paper "done" and poison the dataset.)
+    print("    [extract] All models exhausted — skipping (will retry on re-run).")
+    return None
 
 
 # ── Per-paper extraction ──────────────────────────────────────────────────
 
-def extract_paper(paper: dict) -> dict:
-    """Run RAG + Claude tool-use extraction for all fields; return a result dict."""
+def extract_paper(paper: dict) -> dict | None:
+    """Run RAG + Claude tool-use extraction for all fields; return a result dict
+    (or None if the API call could not be completed — caller should skip)."""
     sections = paper.get("sections", {})
     extractions = extract_with_claude(sections)
+    if extractions is None:
+        return None
 
     for field, val in extractions.items():
         print(f"    {field}: {str(val)[:80]}")
@@ -366,7 +387,7 @@ def run():
     if processed:
         print(f"Resuming: {len(processed)} papers already processed.\n")
 
-    kept_n = excluded_n = 0
+    kept_n = excluded_n = skipped_n = 0
     for i, paper in enumerate(papers, 1):
         doi = paper.get("doi", f"unknown_{i}")
         title = paper.get("title", "")[:80]
@@ -377,6 +398,12 @@ def run():
             continue
 
         extractions = extract_paper(paper)
+        if extractions is None:
+            # API failure — do NOT write or mark processed; a re-run will retry.
+            skipped_n += 1
+            print("  → API failure, left for a later re-run.\n")
+            time.sleep(RATE_LIMIT_PAUSE)
+            continue
 
         row = {
             "title": paper.get("title", ""),
@@ -399,8 +426,11 @@ def run():
         processed.add(doi)
         time.sleep(RATE_LIMIT_PAUSE)
 
-    print(f"\nDone. {kept_n} to review in {OUTPUT_CSV.name}, "
-          f"{excluded_n} set aside in {EXCLUDED_CSV.name}.")
+    msg = (f"\nDone. {kept_n} to review in {OUTPUT_CSV.name}, "
+           f"{excluded_n} set aside in {EXCLUDED_CSV.name}.")
+    if skipped_n:
+        msg += f"\n{skipped_n} skipped due to API failures — re-run to retry them."
+    print(msg)
 
 
 if __name__ == "__main__":
