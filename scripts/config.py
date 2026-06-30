@@ -28,6 +28,10 @@ SCOPUS_QUERY = (
     'OR "MACE" OR "MLIP" OR "moment tensor potential" OR "neuroevolution potential") '
     'AND ("alloy" OR "high-entropy alloy" OR "refractory alloy" OR "interatomic potential" '
     'OR "HEA" OR "multi-principal" OR "superalloy") '
+    # Mechanical-properties filter — keep the corpus to ML predicting mech. behaviour
+    'AND ("mechanical propert*" OR "yield strength" OR "tensile strength" '
+    'OR "hardness" OR "ductility" OR "elongation" OR "fracture toughness" '
+    'OR "fatigue" OR "creep" OR "plasticity" OR "flow stress" OR "strength-ductility") '
     ') '
     'AND SRCTITLE('
     # Elsevier-only journals (full text fetchable via Elsevier Article API)
@@ -38,7 +42,7 @@ SCOPUS_QUERY = (
     '"Computational Materials Today" OR '
     '"Engineering Applications of Artificial Intelligence"'
     ') '
-    'AND PUBYEAR > 2016'
+    'AND PUBYEAR > 2019'
 )
 
 SCOPUS_URL = "https://api.elsevier.com/content/search/scopus"
@@ -55,8 +59,10 @@ AI_GATEWAY_API_KEY = os.environ.get("JHU_AI_GATEWAY_API_KEY", "")
 # Compat route — OpenAI chat-completions shape, provider-prefixed model names
 AI_GATEWAY_URL = "https://gateway.engineering.jhu.edu/gateway/compat/chat/completions"
 
-# Used for classification (retrieve_data.py)
-CLASSIFY_MODEL = "anthropic/claude-opus-4-8"
+# Used for classification (retrieve_data.py) — a coarse trained/finetuned/unclear
+# label, run on every candidate (~hundreds). Sonnet is plenty for this and far
+# cheaper than Opus at scale; drop to claude-haiku-4.5 for max savings.
+CLASSIFY_MODEL = "anthropic/claude-sonnet-4.6"
 # Used for field extraction (extract_data.py) — higher accuracy
 EXTRACT_MODEL = "anthropic/claude-opus-4-8"
 
@@ -92,7 +98,10 @@ SPRINGER_QUERY = (
     'OR "interatomic potential" OR "MLIP") '
     'AND (alloy OR "high-entropy alloy" OR "refractory alloy" OR HEA '
     'OR "multi-principal" OR superalloy) '
-    f'AND issn:{SPRINGER_ISSN} AND datefrom:2017-01-01'
+    'AND ("mechanical properties" OR "yield strength" OR "tensile strength" '
+    'OR hardness OR ductility OR elongation OR "fracture toughness" '
+    'OR fatigue OR creep OR plasticity) '
+    f'AND issn:{SPRINGER_ISSN} AND datefrom:2020-01-01'
 )
 SPRINGER_MAX_RESULTS = 500
 
