@@ -53,9 +53,12 @@ def run():
         if sections.get("supplementary", "").strip():
             print("  → already has supplementary, skipping.\n")
             continue
-        # arXiv papers won't resolve against the Elsevier API
-        if not doi or paper.get("source") == "arxiv":
-            print("  → no Elsevier DOI, skipping.\n")
+        # This backfill only handles Elsevier (mmcN objects). Springer/npj DOIs
+        # (10.1038/...) and arXiv won't resolve against the Elsevier API — skip
+        # them rather than firing 404s. (Legacy papers with no source field are
+        # the original Acta Materialia set, i.e. Elsevier, so they still run.)
+        if not doi or paper.get("source") in ("springer", "arxiv"):
+            print("  → non-Elsevier source, skipping supplementary.\n")
             continue
 
         text = adapter.fetch_supplementary_text(doi)
