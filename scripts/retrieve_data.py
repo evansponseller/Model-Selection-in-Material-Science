@@ -173,8 +173,8 @@ def run():
     else:
         print("SPRINGER_API_KEY not set — skipping Springer adapter.\n")
 
-    # arXiv is always attempted (no key required)
-    adapters.append(("arXiv", ArxivAdapter(), ARXIV_MAX_RESULTS))
+    # arXiv disabled per request — restrict the corpus to the curated journals.
+    # adapters.append(("arXiv", ArxivAdapter(), ARXIV_MAX_RESULTS))
 
     all_candidates: list[dict] = []
     for source_name, adapter, max_results in adapters:
@@ -202,7 +202,8 @@ def run():
         adapter_map["elsevier"] = ElsevierAdapter()
     if SPRINGER_API_KEY:
         adapter_map["springer"] = SpringerAdapter()
-    adapter_map["arxiv"] = ArxivAdapter()
+    # arXiv disabled per request
+    # adapter_map["arxiv"] = ArxivAdapter()
 
     for i, paper in enumerate(unique_candidates, 1):
         pid = paper.get("paper_id", "")

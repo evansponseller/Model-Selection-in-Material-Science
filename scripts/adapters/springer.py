@@ -48,7 +48,7 @@ class SpringerAdapter(PublisherAdapter):
 
         results: list[dict] = []
         start = 1            # Springer is 1-indexed
-        page_size = 50
+        page_size = 25       # Open Access free tier caps page size at 25 (p>25 → 403)
 
         while len(results) < max_results:
             params = {
@@ -119,7 +119,14 @@ class SpringerAdapter(PublisherAdapter):
             print(f"  [springer] JATS parse error for {doi}: {exc}")
             return None
 
-        return self._parse_jats(root)
+        result = self._parse_jats(root)
+        # Recent online-first articles sometimes expose only the abstract in JATS.
+        # Without a body there's nothing to extract — skip (returning None means
+        # it isn't persisted, so it's retried on a later run once full text exists).
+        if not any(k != "abstract" for k in result["sections"]):
+            print(f"  [springer] {doi}: full-text body not available yet (abstract only).")
+            return None
+        return result
 
     def _parse_jats(self, root: ET.Element) -> dict:
         """Pull section titles + text and tables from a JATS <article>."""

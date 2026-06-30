@@ -31,16 +31,12 @@ SCOPUS_QUERY = (
     ') '
     'AND SRCTITLE('
     # Elsevier-only journals (full text fetchable via Elsevier Article API)
-    '"Acta Materialia" OR "Scripta Materialia" OR '
+    '"Acta Materialia" OR '
     '"Computational Materials Science" OR '
-    '"Journal of Nuclear Materials" OR '
-    '"Materials Today Communications" OR '
-    '"Journal of Alloys and Compounds" OR '
     '"Materials Science and Engineering A" OR '
     '"Materials and Design" OR '
     '"Computational Materials Today" OR '
-    '"Engineering Applications of Artificial Intelligence" OR '
-    '"Calphad"'
+    '"Engineering Applications of Artificial Intelligence"'
     ') '
     'AND PUBYEAR > 2016'
 )
