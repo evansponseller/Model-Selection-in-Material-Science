@@ -37,6 +37,9 @@ SCOPUS_QUERY = (
     '"Materials Today Communications" OR '
     '"Journal of Alloys and Compounds" OR '
     '"Materials Science and Engineering A" OR '
+    '"Materials and Design" OR '
+    '"Computational Materials Today" OR '
+    '"Engineering Applications of Artificial Intelligence" OR '
     '"Calphad"'
     ') '
     'AND PUBYEAR > 2016'
@@ -78,6 +81,24 @@ ARXIV_QUERY = (
 ARXIV_CATEGORIES = ["cond-mat.mtrl-sci"]
 ARXIV_MAX_RESULTS = 500
 AR5IV_URL = "https://ar5iv.labs.arxiv.org/html/{arxiv_id}"
+
+# ── Springer Nature (npj Computational Materials, fully open-access) ────────
+# Key from https://dev.springernature.com (free tier). The OpenAccess API
+# returns full-text JATS XML for OA articles.
+SPRINGER_API_KEY = os.environ.get("SPRINGER_API_KEY", "")
+SPRINGER_META_URL = "https://api.springernature.com/openaccess/json"
+SPRINGER_JATS_URL = "https://api.springernature.com/openaccess/jats"
+# npj Computational Materials — eISSN 2057-3960
+SPRINGER_ISSN = "2057-3960"
+SPRINGER_QUERY = (
+    '("machine learning" OR "deep learning" OR "neural network" '
+    'OR "gaussian process" OR "random forest" OR "support vector" '
+    'OR "interatomic potential" OR "MLIP") '
+    'AND (alloy OR "high-entropy alloy" OR "refractory alloy" OR HEA '
+    'OR "multi-principal" OR superalloy) '
+    f'AND issn:{SPRINGER_ISSN} AND datefrom:2017-01-01'
+)
+SPRINGER_MAX_RESULTS = 500
 
 # ── Extraction settings ────────────────────────────────────────────────────
 # Max characters of retrieved context sent to LLM per field question

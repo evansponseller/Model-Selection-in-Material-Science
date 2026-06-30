@@ -22,7 +22,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 import requests
 
-from adapters import ArxivAdapter, ElsevierAdapter
+from adapters import ArxivAdapter, ElsevierAdapter, SpringerAdapter
 from config import (
     AI_GATEWAY_API_KEY,
     AI_GATEWAY_URL,
@@ -36,6 +36,8 @@ from config import (
     OUTPUT_JSON,
     RATE_LIMIT_PAUSE,
     RATE_LIMIT_RETRY_PAUSE,
+    SPRINGER_API_KEY,
+    SPRINGER_MAX_RESULTS,
 )
 
 # ── Sentence utilities ────────────────────────────────────────────────────
@@ -166,6 +168,11 @@ def run():
     else:
         print("ELSEVIER_API_KEY not set — skipping Elsevier adapter.\n")
 
+    if SPRINGER_API_KEY:
+        adapters.append(("Springer Nature", SpringerAdapter(), SPRINGER_MAX_RESULTS))
+    else:
+        print("SPRINGER_API_KEY not set — skipping Springer adapter.\n")
+
     # arXiv is always attempted (no key required)
     adapters.append(("arXiv", ArxivAdapter(), ARXIV_MAX_RESULTS))
 
@@ -193,6 +200,8 @@ def run():
     adapter_map: dict[str, object] = {}
     if ELSEVIER_API_KEY:
         adapter_map["elsevier"] = ElsevierAdapter()
+    if SPRINGER_API_KEY:
+        adapter_map["springer"] = SpringerAdapter()
     adapter_map["arxiv"] = ArxivAdapter()
 
     for i, paper in enumerate(unique_candidates, 1):
